@@ -1,0 +1,24 @@
+:root {
+  --bg: #efeeec;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body,
+#__next {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  overflow: hidden;
+}
+
+#__next {
+  display: grid;
+  place-items: center;
+}

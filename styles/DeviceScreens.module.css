@@ -1,0 +1,43 @@
+/* 원본 이미지 비율(2560×1428)을 유지하며 화면에 맞춤 */
+.stage {
+  position: relative;
+  width: min(100vw, calc(100vh * 2560 / 1428));
+  aspect-ratio: 2560 / 1428;
+}
+
+.stage > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* 원형 스크린 위치 (이미지 픽셀 측정값 기준 %) */
+.screen {
+  position: absolute;
+  top: 21.113%;
+  width: 20.625%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #000;
+  transform: translateZ(0); /* Safari 원형 클리핑 보정 */
+}
+
+.left {
+  left: 27.383%;
+}
+
+.right {
+  left: 51.992%;
+}
+
+.screen video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}

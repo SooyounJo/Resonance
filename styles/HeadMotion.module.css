@@ -15,6 +15,7 @@
   position: relative;
   width: min(100vw, calc(100vh * 2560 / 1428));
   aspect-ratio: 2560 / 1428;
+  transform: translateY(6%); /* 상단 바 공간만큼 기기를 아래로 (사진 아래 여백 안에서) */
 }
 
 .stage img,

@@ -1,0 +1,48 @@
+.page {
+  --bg: #eeeeec;
+  --ui-fg: #2a2522;
+  --ui-muted: #8a817b;
+
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  color: var(--ui-fg);
+}
+
+.stage {
+  position: relative;
+  width: min(100vw, calc(100vh * 2560 / 1428));
+  aspect-ratio: 2560 / 1428;
+}
+
+.stage img,
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+
+.caption {
+  position: fixed;
+  left: 20px;
+  bottom: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.caption small {
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--ui-muted);
+  margin-left: 6px;
+}

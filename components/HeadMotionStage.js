@@ -1,6 +1,16 @@
 import { useEffect, useRef } from "react";
 import styles from "@/styles/HeadMotion.module.css";
-import { RIGHT_DELAY, DUR, HEADS, DOME_FADE, SEGMENTS, TRACKS, MEDIA } from "@/lib/headMotion/config";
+import {
+  RIGHT_DELAY,
+  DUR,
+  HEADS,
+  DOME_FADE,
+  SEGMENTS,
+  TRACKS,
+  MEDIA,
+  MAX_DPR,
+  SCREEN_SHARPEN,
+} from "@/lib/headMotion/config";
 import { RING } from "@/lib/headMotion/ring";
 import { sample, nod, drift, xform, mod } from "@/lib/headMotion/motion";
 import { VS, FS } from "@/lib/headMotion/shaders";
@@ -71,6 +81,9 @@ export default function HeadMotionStage() {
     gl.uniform1i(U("uTex0"), 0);
     gl.uniform1i(U("uTex1"), 1);
     gl.uniform1i(U("uRing"), 2);
+    gl.uniform1f(U("uSharpen"), SCREEN_SHARPEN);
+    gl.uniform2f(U("uTexel"), 1 / 720, 1 / 720);
+    gl.uniform1i(U("uPlate"), 3);
 
     const texs = [makeTex(gl, 0), makeTex(gl, 1)];
     // 명암 프로파일 텍스처
@@ -81,9 +94,20 @@ export default function HeadMotionStage() {
     );
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
 
+    // 받침 돔 색을 맞추기 위한 배경 사진 텍스처
+    const plateTex = makeTex(gl, 3);
+    const plateImg = new Image();
+    plateImg.onload = () => {
+      if (disposed) return;
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, plateTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, plateImg);
+    };
+    plateImg.src = MEDIA.image;
+
     const uRes = U("uRes");
     function resize() {
-      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const dpr = Math.min(devicePixelRatio || 1, MAX_DPR);
       const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
@@ -96,6 +120,11 @@ export default function HeadMotionStage() {
     /* ═════════ 비디오 ═════════ */
     const canMp4 = document.createElement("video").canPlayType('video/mp4; codecs="avc1.42E01E"');
     const vids = [makeVideo("reasoning", canMp4), makeVideo("generative", canMp4)];
+    vids[0].addEventListener(
+      "loadedmetadata",
+      () => !disposed && gl.uniform2f(U("uTexel"), 1 / vids[0].videoWidth, 1 / vids[0].videoHeight),
+      { once: true }
+    );
     const onEnded = (e) => {
       e.currentTarget.currentTime = 0;
       e.currentTarget.play().catch(() => {});
@@ -184,7 +213,8 @@ export default function HeadMotionStage() {
         v.removeAttribute("src");
         v.load();
       });
-      [...texs, ringTex].forEach((t) => gl.deleteTexture(t));
+      plateImg.onload = null;
+      [...texs, ringTex, plateTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);

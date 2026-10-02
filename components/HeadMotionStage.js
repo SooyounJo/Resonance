@@ -12,10 +12,14 @@ import {
   SCREEN_SHARPEN,
   MOTION_SCALE,
   INTRO,
+  IMG_W,
 } from "@/lib/headMotion/config";
 import { RING } from "@/lib/headMotion/ring";
 import { sample, nod, drift, xform, mod } from "@/lib/headMotion/motion";
 import { VS, FS } from "@/lib/headMotion/shaders";
+
+// 캡슐 줄 폭: 좌측 머리 바깥 끝 ~ 우측 머리 바깥 끝 (사진 폭 대비 비율)
+const STEPS_W = (HEADS[1].c[0] + HEADS[1].r - (HEADS[0].c[0] - HEADS[0].r)) / IMG_W;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -51,7 +55,8 @@ function makeVideo(name, canMp4, loop = true) {
 
 export default function HeadMotionStage() {
   const canvasRef = useRef(null);
-  const titleRef = useRef(null);
+  const stepRefs = useRef([]);
+  const notifyRefs = useRef([]);
   useEffect(() => {
     const canvas = canvasRef.current;
     const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false });
@@ -203,6 +208,39 @@ export default function HeadMotionStage() {
       const k = Math.min(Math.max((x - a) / (b - a), 0), 1);
       return k * k * (3 - 2 * k);
     };
+    /* ═════════ 상단 단계 캡슐 ═════════ */
+    let curStep = -1, front = 0;
+    function updateSteps(t) {
+      let k = SEGMENTS.length - 1;
+      while (k > 0 && t < SEGMENTS[k][0]) k--;
+      stepRefs.current.forEach((el, j) => {
+        if (!el) return;
+        const end = j + 1 < SEGMENTS.length ? SEGMENTS[j + 1][0] : DUR;
+        const p = j < k ? 1 : j > k ? 0 : Math.min(Math.max((t - SEGMENTS[j][0]) / (end - SEGMENTS[j][0]), 0), 1);
+        el.style.setProperty("--p", p.toFixed(4));
+      });
+      if (k === curStep) return;
+      stepRefs.current.forEach((el, j) => {
+        if (!el) return;
+        el.classList.toggle(styles.active, j === k);
+        el.classList.toggle(styles.done, j < k);
+      });
+      // 알림: 이전 문구는 블러로 사라지고 새 문구가 블러에서 선명해짐
+      const n = notifyRefs.current;
+      if (n[0] && n[1]) {
+        if (curStep >= 0) {
+          n[front].className = styles.out;
+          front ^= 1;
+        }
+        const el = n[front];
+        el.textContent = SEGMENTS[k][3];
+        el.className = "";
+        void el.offsetWidth;
+        el.className = styles.in;
+      }
+      curStep = k;
+    }
+
     let raf;
     function frame() {
       resize();
@@ -251,10 +289,7 @@ export default function HeadMotionStage() {
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      const seg = [...SEGMENTS].reverse().find(([s]) => t0 >= s) || SEGMENTS[0];
-      if (titleRef.current.textContent !== seg[1]) {
-        titleRef.current.textContent = seg[1];
-      }
+      updateSteps(t0);
       raf = requestAnimationFrame(frame);
     }
     raf = requestAnimationFrame(frame);
@@ -290,9 +325,23 @@ export default function HeadMotionStage() {
         <canvas ref={canvasRef} />
       </div>
 
-      <p className={styles.caption} aria-live="polite">
-        <span ref={titleRef}>{SEGMENTS[0][1]}</span>
-      </p>
+      <header className={styles.header} style={{ "--steps-w": STEPS_W }}>
+        <h1 className={styles.title}>Resonance</h1>
+        <ol className={styles.steps}>
+          {SEGMENTS.map(([, , , en], i) => (
+            <li key={i} ref={(el) => (stepRefs.current[i] = el)} className={styles.step}>
+              <span>{en}</span>
+              <div className={styles.fill} aria-hidden="true">
+                <span>{en}</span>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <p className={styles.notify} aria-live="polite">
+          <span ref={(el) => (notifyRefs.current[0] = el)} />
+          <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
+        </p>
+      </header>
     </div>
   );
 }

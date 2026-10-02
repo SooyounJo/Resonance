@@ -10,6 +10,8 @@ import {
   MEDIA,
   MAX_DPR,
   SCREEN_SHARPEN,
+  MOTION_SCALE,
+  INTRO,
 } from "@/lib/headMotion/config";
 import { RING } from "@/lib/headMotion/ring";
 import { sample, nod, drift, xform, mod } from "@/lib/headMotion/motion";
@@ -35,11 +37,11 @@ function makeTex(gl, unit) {
   return t;
 }
 
-function makeVideo(name, canMp4) {
+function makeVideo(name, canMp4, loop = true) {
   const v = document.createElement("video");
   v.src = MEDIA[name][canMp4 ? "mp4" : "webm"];
   v.muted = true;
-  v.loop = true;
+  v.loop = loop;
   v.playsInline = true;
   v.preload = "auto";
   v.setAttribute("playsinline", "");
@@ -50,8 +52,6 @@ function makeVideo(name, canMp4) {
 export default function HeadMotionStage() {
   const canvasRef = useRef(null);
   const titleRef = useRef(null);
-  const subRef = useRef(null);
-
   useEffect(() => {
     const canvas = canvasRef.current;
     const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false });
@@ -84,8 +84,11 @@ export default function HeadMotionStage() {
     gl.uniform1f(U("uSharpen"), SCREEN_SHARPEN);
     gl.uniform2f(U("uTexel"), 1 / 720, 1 / 720);
     gl.uniform1i(U("uPlate"), 3);
+    gl.uniform1i(U("uIntro"), 4);
+    gl.uniform4f(U("uIntroTint"), ...INTRO.rightTint.color.map((v) => v / 255), INTRO.rightTint.amount);
 
     const texs = [makeTex(gl, 0), makeTex(gl, 1)];
+    const introTex = makeTex(gl, 4);
     // 명암 프로파일 텍스처
     const ringTex = makeTex(gl, 2);
     const n = RING.left.length, data = new Uint8Array(n * 2 * 4);
@@ -125,38 +128,68 @@ export default function HeadMotionStage() {
       () => !disposed && gl.uniform2f(U("uTexel"), 1 / vids[0].videoWidth, 1 / vids[0].videoHeight),
       { once: true }
     );
+    const intro = makeVideo("intro", canMp4, false);
+    // 루프 영상별 첫 바퀴 여부 (첫 바퀴에만 인트로에서 블러로 넘어옴)
+    const firstPass = [true, true];
     const onEnded = (e) => {
+      firstPass[vids.indexOf(e.currentTarget)] = false;
       e.currentTarget.currentTime = 0;
       e.currentTarget.play().catch(() => {});
     };
     vids.forEach((v) => v.addEventListener("ended", onEnded));
 
     /* ═════════ 재생 ═════════ */
-    let playing = false, forced = null, disposed = false;
+    let playing = false, loopsStarted = false, introFailed = false, forced = null, disposed = false;
     const timers = [];
 
+    function startLoops() {
+      if (loopsStarted) return;
+      loopsStarted = true;
+      vids[0].play().catch(() => {});
+      timers.push(setTimeout(() => vids[1].play().catch(() => {}), RIGHT_DELAY * 1000));
+    }
+
     function start() {
-      vids.forEach((v) => {
+      timers.forEach(clearTimeout);
+      timers.length = 0;
+      loopsStarted = false;
+      firstPass.fill(true);
+      [intro, ...vids].forEach((v) => {
         v.pause();
         v.currentTime = 0;
       });
-      vids[0].play().catch(() => {});
-      timers.push(setTimeout(() => vids[1].play().catch(() => {}), RIGHT_DELAY * 1000));
+      if (introFailed) startLoops();
+      else intro.play().catch(() => {});
       playing = true;
     }
+    intro.addEventListener("ended", startLoops);
+    intro.addEventListener("error", () => {
+      if (disposed) return;
+      introFailed = true;
+      if (playing) startLoops();
+    });
 
     // 자동재생이 막힌 경우 첫 클릭 시 재생
     const onFirstPointer = () => {
-      if (vids[0].paused) start();
+      if (intro.paused && vids[0].paused) start();
     };
     const onVisibility = () => {
-      if (!document.hidden && playing) vids.forEach((v) => v.paused && v.play().catch(() => {}));
+      if (document.hidden || !playing) return;
+      if (!loopsStarted) intro.paused && !intro.ended && intro.play().catch(() => {});
+      else vids.forEach((v) => v.paused && v.play().catch(() => {}));
     };
     addEventListener("pointerdown", onFirstPointer, { once: true });
     document.addEventListener("visibilitychange", onVisibility);
 
     Promise.all(
-      vids.map((v) => (v.readyState >= 3 ? 0 : new Promise((r) => v.addEventListener("canplay", r, { once: true }))))
+      [intro, ...vids].map((v) =>
+        v.readyState >= 3
+          ? 0
+          : new Promise((r) => {
+              v.addEventListener("canplay", r, { once: true });
+              if (v === intro) v.addEventListener("error", r, { once: true });
+            })
+      )
     ).then(() => !disposed && start());
 
     window.__setTime = (t) => {
@@ -165,17 +198,44 @@ export default function HeadMotionStage() {
 
     /* ═════════ 루프 ═════════ */
     const uM = [U("uM[0]"), U("uM[1]")], uMi = [U("uMi[0]"), U("uMi[1]")], uT = [U("uT[0]"), U("uT[1]")];
+    const uIntroA = U("uIntroA"), uLoopA = U("uLoopA"), uBlur = U("uBlur");
+    const ramp = ([a, b], x) => {
+      const k = Math.min(Math.max((x - a) / (b - a), 0), 1);
+      return k * k * (3 - 2 * k);
+    };
     let raf;
     function frame() {
       resize();
+
+      // 인트로 → 루프 전환
+      if (playing && !loopsStarted && !introFailed && intro.duration && intro.currentTime >= intro.duration - INTRO.overlap) {
+        startLoops();
+      }
+      const ia = introFailed ? 0 : ramp([0, INTRO.fadeIn], intro.currentTime);
+      const la = [0, 0], br = [0, 0];
+      for (let i = 0; i < 2; i++) {
+        const ct = vids[i].currentTime;
+        la[i] = firstPass[i] ? ramp(INTRO.reveal, ct) : 1;
+        br[i] = firstPass[i] ? INTRO.blur * (1 - ramp(INTRO.unblur, ct)) : 0;
+      }
+      const showIntro = la[0] < 1 || la[1] < 1;
+      gl.uniform2f(uIntroA, showIntro ? ia : 0, showIntro ? ia : 0);
+      gl.uniform2f(uLoopA, la[0], la[1]);
+      gl.uniform2f(uBlur, br[0], br[1]);
+      if (showIntro && intro.readyState >= 2 && !intro.seeking) {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, introTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, intro);
+      }
+
       const t0 = forced ?? vids[0].currentTime;
       const ts = [t0, forced != null ? mod(forced - RIGHT_DELAY, DUR) : vids[1].currentTime];
       for (let i = 0; i < 2; i++) {
         const t = ts[i], tr = TRACKS[i];
         const [np_, ny_, gate] = nod(tr.nods, t);
         const [dy_, dp_] = drift(t, i);
-        const yaw = (sample(tr.yaw, t) + ny_ + dy_ * gate) * (i === 0 ? 1 : -1);
-        const pitch = sample(tr.pitch, t) + np_ + dp_ * gate;
+        const yaw = ((sample(tr.yaw, t) + ny_) * MOTION_SCALE.yaw + dy_ * gate) * (i === 0 ? 1 : -1);
+        const pitch = (sample(tr.pitch, t) + np_) * MOTION_SCALE.pitch + dp_ * gate;
         const [M, Mi, T] = xform(yaw, pitch);
         gl.uniformMatrix3fv(uM[i], false, M);
         gl.uniformMatrix3fv(uMi[i], false, Mi);
@@ -194,7 +254,6 @@ export default function HeadMotionStage() {
       const seg = [...SEGMENTS].reverse().find(([s]) => t0 >= s) || SEGMENTS[0];
       if (titleRef.current.textContent !== seg[1]) {
         titleRef.current.textContent = seg[1];
-        subRef.current.textContent = seg[2];
       }
       raf = requestAnimationFrame(frame);
     }
@@ -207,14 +266,15 @@ export default function HeadMotionStage() {
       removeEventListener("pointerdown", onFirstPointer);
       document.removeEventListener("visibilitychange", onVisibility);
       delete window.__setTime;
-      vids.forEach((v) => {
-        v.removeEventListener("ended", onEnded);
+      vids.forEach((v) => v.removeEventListener("ended", onEnded));
+      intro.removeEventListener("ended", startLoops);
+      [intro, ...vids].forEach((v) => {
         v.pause();
         v.removeAttribute("src");
         v.load();
       });
       plateImg.onload = null;
-      [...texs, ringTex, plateTex].forEach((t) => gl.deleteTexture(t));
+      [...texs, introTex, ringTex, plateTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);
@@ -232,7 +292,6 @@ export default function HeadMotionStage() {
 
       <p className={styles.caption} aria-live="polite">
         <span ref={titleRef}>{SEGMENTS[0][1]}</span>
-        <small ref={subRef}>{SEGMENTS[0][2]}</small>
       </p>
     </div>
   );

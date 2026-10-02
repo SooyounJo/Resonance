@@ -1,8 +1,6 @@
 .page {
   --bg: #eeeeec;
   --ui-fg: #2a2522;
-  --ui-muted: #8a817b;
-
   position: fixed;
   inset: 0;
   background: var(--bg);
@@ -38,11 +36,4 @@
   font-weight: 600;
   pointer-events: none;
   user-select: none;
-}
-
-.caption small {
-  font-size: inherit;
-  font-weight: 400;
-  color: var(--ui-muted);
-  margin-left: 6px;
 }

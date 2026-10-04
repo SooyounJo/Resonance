@@ -1,9 +1,13 @@
+/* 테마: main = 기본 회색 배경, night = 밤 다이닝 공간 */
 .page {
   --bg: #eeeeec;
   --ui-fg: #2a2522;
+  --cap-bg: rgba(42, 37, 34, 0.07);
+  --cap-fill: #fbfaf8;
   position: fixed;
   inset: 0;
   background: var(--bg);
+  transition: background-color 0.6s ease, color 0.6s ease;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -11,11 +15,18 @@
   color: var(--ui-fg);
 }
 
+.page[data-theme="night"] {
+  --bg: #030303;
+  --ui-fg: #f2efea;
+  --cap-bg: rgba(255, 255, 255, 0.07);
+  --cap-fill: rgba(255, 255, 255, 0.2);
+}
+
 .stage {
   position: relative;
-  width: min(100vw, calc(100vh * 2560 / 1428));
-  aspect-ratio: 2560 / 1428;
-  transform: translateY(6%); /* 상단 바 공간만큼 기기를 아래로 (사진 아래 여백 안에서) */
+  width: min(100vw, calc(100vh * 2560 / 1600));
+  aspect-ratio: 2560 / 1600;
+  transform: translateY(4%); /* 상단 바 공간만큼 기기를 아래로 (탁자 앞 가장자리가 잘리지 않는 한도) */
 }
 
 .stage img,
@@ -29,6 +40,16 @@
   pointer-events: none;
 }
 
+/* 배경 사진: 테마 전환 시 서로 겹치며 바뀜 */
+.plate {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+
+.plate[data-on="true"] {
+  opacity: 1;
+}
+
 /* ═════════ 상단 바 ═════════ */
 .header {
   position: fixed;
@@ -40,7 +61,7 @@
   align-items: baseline;
   gap: 16px;
   padding: 22px 28px;
-  font-family: "Pretendard Variable", Pretendard, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Wanted Sans Variable", "Helvetica Neue", Helvetica, Arial, sans-serif;
   pointer-events: none;
   user-select: none;
   z-index: 2;
@@ -57,7 +78,7 @@
 /* 단계 캡슐 */
 .steps {
   /* 무대(.stage)와 같은 폭 기준으로 기기 바깥 끝에 맞춤 */
-  width: calc(min(100vw, 100vh * 2560 / 1428) * var(--steps-w));
+  width: calc(min(100vw, 100vh * 2560 / 1600) * var(--steps-w));
   display: flex;
   gap: 6px;
   transform: translateY(3px); /* 시각 보정: 알약 형태라 바닥선 정렬 시 위로 떠 보임 */
@@ -76,7 +97,8 @@
   display: grid;
   place-items: center;
   border-radius: 999px;
-  background: rgba(42, 37, 34, 0.07);
+  background: var(--cap-bg);
+  transition: background-color 0.6s ease;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -104,8 +126,9 @@
   padding: inherit;
   display: grid;
   place-items: center;
-  background: #fbfaf8;
+  background: var(--cap-fill);
   color: var(--ui-fg);
+  transition: background-color 0.6s ease;
   clip-path: inset(0 calc((1 - var(--p)) * 100%) 0 0 round 999px);
 }
 
@@ -130,10 +153,52 @@
   }
 }
 
+/* 우측: 현재 단계 알림 + 테마 버튼 */
+.right {
+  justify-self: end;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.themes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--cap-bg);
+  transform: translateY(3px); /* 캡슐과 같은 시각 보정 */
+  pointer-events: auto;
+  transition: background-color 0.6s ease;
+}
+
+.themes button {
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: background-color 0.4s ease, opacity 0.4s ease;
+}
+
+.themes button:hover {
+  opacity: 0.8;
+}
+
+.themes button[aria-pressed="true"] {
+  background: var(--cap-fill);
+  opacity: 1;
+}
+
 /* 현재 단계 알림 */
 .notify {
   margin: 0;
-  justify-self: end;
   display: grid;
   font-size: 12px;
   font-weight: 500;

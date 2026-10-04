@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "@/styles/HeadMotion.module.css";
 import {
   RIGHT_DELAY,
@@ -13,6 +13,8 @@ import {
   MOTION_SCALE,
   INTRO,
   IMG_W,
+  AUDIO,
+  PLAYBACK_RATE,
 } from "@/lib/headMotion/config";
 import { RING } from "@/lib/headMotion/ring";
 import { sample, nod, drift, xform, mod } from "@/lib/headMotion/motion";
@@ -48,6 +50,7 @@ function makeVideo(name, canMp4, loop = true) {
   v.loop = loop;
   v.playsInline = true;
   v.preload = "auto";
+  v.defaultPlaybackRate = v.playbackRate = PLAYBACK_RATE;
   v.setAttribute("playsinline", "");
   v.setAttribute("muted", "");
   return v;
@@ -57,6 +60,19 @@ export default function HeadMotionStage() {
   const canvasRef = useRef(null);
   const stepRefs = useRef([]);
   const notifyRefs = useRef([]);
+  const [theme, setTheme] = useState("main");
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
+  useEffect(() => {
+    const saved = localStorage.getItem("resonance-theme");
+    if (saved && MEDIA.themes[saved]) setTheme(saved);
+  }, []);
+  const chooseTheme = (t) => {
+    setTheme(t);
+    localStorage.setItem("resonance-theme", t);
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false });
@@ -88,7 +104,6 @@ export default function HeadMotionStage() {
     gl.uniform1i(U("uRing"), 2);
     gl.uniform1f(U("uSharpen"), SCREEN_SHARPEN);
     gl.uniform2f(U("uTexel"), 1 / 720, 1 / 720);
-    gl.uniform1i(U("uPlate"), 3);
     gl.uniform1i(U("uIntro"), 4);
     gl.uniform4f(U("uIntroTint"), ...INTRO.rightTint.color.map((v) => v / 255), INTRO.rightTint.amount);
 
@@ -102,16 +117,29 @@ export default function HeadMotionStage() {
     );
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
 
-    // 받침 돔 색을 맞추기 위한 배경 사진 텍스처
-    const plateTex = makeTex(gl, 3);
-    const plateImg = new Image();
-    plateImg.onload = () => {
-      if (disposed) return;
-      gl.activeTexture(gl.TEXTURE3);
-      gl.bindTexture(gl.TEXTURE_2D, plateTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, plateImg);
-    };
-    plateImg.src = MEDIA.image;
+    // 이미지 텍스처: 받침 돔 색용 배경 사진 2장 + night 환경맵 2장
+    const imgs = [];
+    function imageTex(unit, uniform, src, repeatX) {
+      const tex = makeTex(gl, unit);
+      if (repeatX) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); // 환경맵 경도 이음새
+      gl.uniform1i(U(uniform), unit);
+      const img = new Image();
+      img.onload = () => {
+        if (disposed) return;
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      };
+      img.src = src;
+      imgs.push(img);
+      return tex;
+    }
+    const plateTex = imageTex(3, "uPlate", MEDIA.image);
+    const plateNTex = imageTex(5, "uPlateN", MEDIA.themes.night);
+    const envSpecTex = imageTex(6, "uEnvSpec", MEDIA.env.spec, true);
+    const envDiffTex = imageTex(7, "uEnvDiff", MEDIA.env.diff, true);
+    const uEnv = U("uEnv");
+    let envMix = themeRef.current === "night" ? 1 : 0, lastT = performance.now();
 
     const uRes = U("uRes");
     function resize() {
@@ -147,11 +175,34 @@ export default function HeadMotionStage() {
     let playing = false, loopsStarted = false, introFailed = false, forced = null, disposed = false;
     const timers = [];
 
+    /* ═════════ 배경음 ═════════ */
+    const tracks = ["bgm", "jazz"].map((k) => {
+      const a = new Audio(AUDIO[k]);
+      a.preload = "auto";
+      a.loop = false; // 두 곡 모두 끝에 자체 페이드아웃이 있어 반복 없이 루프마다 처음부터 한 번씩
+      a.volume = 0;
+      return a;
+    });
+    let audioMix = 0, jazzOn = false, prevT = 0, master = 0;
+    // 소리 있는 재생은 자동재생 정책에 막힐 수 있어 사용자 입력 때마다 다시 시도
+    function syncAudio() {
+      tracks.forEach((a, i) => {
+        const need = i === 0 ? loopsStarted && (!jazzOn || audioMix < 1) : jazzOn || audioMix > 0;
+        const want = playing && !document.hidden && need;
+        if (want && a.paused && !a.ended) a.play().catch(() => {});
+        else if (!want && !a.paused) a.pause();
+      });
+    }
+    const onUserInput = () => syncAudio();
+    addEventListener("pointerdown", onUserInput);
+    addEventListener("keydown", onUserInput);
+
     function startLoops() {
       if (loopsStarted) return;
       loopsStarted = true;
       vids[0].play().catch(() => {});
-      timers.push(setTimeout(() => vids[1].play().catch(() => {}), RIGHT_DELAY * 1000));
+      syncAudio();
+      timers.push(setTimeout(() => vids[1].play().catch(() => {}), (RIGHT_DELAY * 1000) / PLAYBACK_RATE));
     }
 
     function start() {
@@ -166,6 +217,10 @@ export default function HeadMotionStage() {
       if (introFailed) startLoops();
       else intro.play().catch(() => {});
       playing = true;
+      tracks.forEach((a) => (a.currentTime = 0));
+      jazzOn = false;
+      audioMix = prevT = master = 0;
+      syncAudio();
     }
     intro.addEventListener("ended", startLoops);
     intro.addEventListener("error", () => {
@@ -179,6 +234,7 @@ export default function HeadMotionStage() {
       if (intro.paused && vids[0].paused) start();
     };
     const onVisibility = () => {
+      syncAudio();
       if (document.hidden || !playing) return;
       if (!loopsStarted) intro.paused && !intro.ended && intro.play().catch(() => {});
       else vids.forEach((v) => v.paused && v.play().catch(() => {}));
@@ -245,6 +301,13 @@ export default function HeadMotionStage() {
     function frame() {
       resize();
 
+      // 테마 조명 전환 (배경 사진 크로스페이드 0.8초와 같은 속도)
+      const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1);
+      lastT = now;
+      const envTarget = themeRef.current === "night" ? 1 : 0;
+      envMix = envTarget > envMix ? Math.min(envMix + dt / 0.8, 1) : Math.max(envMix - dt / 0.8, 0);
+      gl.uniform1f(uEnv, envMix);
+
       // 인트로 → 루프 전환
       if (playing && !loopsStarted && !introFailed && intro.duration && intro.currentTime >= intro.duration - INTRO.overlap) {
         startLoops();
@@ -267,6 +330,30 @@ export default function HeadMotionStage() {
       }
 
       const t0 = forced ?? vids[0].currentTime;
+
+      // 배경음: 정렬 시작에서 bgm → jazz 로 짧게 전환, 루프가 처음으로 돌아가면 bgm 도 처음부터
+      if (playing) {
+        if (t0 < prevT - 1) {
+          tracks[0].currentTime = 0;
+          syncAudio();
+        }
+        prevT = t0;
+        const wantJazz = loopsStarted && t0 >= AUDIO.jazzFrom - AUDIO.lead;
+        if (wantJazz !== jazzOn) {
+          jazzOn = wantJazz;
+          if (jazzOn) tracks[1].currentTime = 0;
+          syncAudio();
+        }
+        const prevMix = audioMix;
+        audioMix = jazzOn ? Math.min(audioMix + dt / AUDIO.fadeIn, 1) : Math.max(audioMix - dt / AUDIO.fadeOut, 0);
+        if (loopsStarted) master = Math.min(master + dt / AUDIO.startFade, 1);
+        // 레이즈드 코사인: 아주 작게 시작해 부드럽게 커지고 끝에서 완만히 정착
+        const s = (1 - Math.cos(audioMix * Math.PI)) / 2;
+        tracks[0].volume = AUDIO.volume * master * (1 - s);
+        tracks[1].volume = AUDIO.volume * s;
+        if (audioMix !== prevMix && (audioMix === 0 || audioMix === 1)) syncAudio();
+      }
+
       const ts = [t0, forced != null ? mod(forced - RIGHT_DELAY, DUR) : vids[1].currentTime];
       for (let i = 0; i < 2; i++) {
         const t = ts[i], tr = TRACKS[i];
@@ -299,6 +386,13 @@ export default function HeadMotionStage() {
       cancelAnimationFrame(raf);
       timers.forEach(clearTimeout);
       removeEventListener("pointerdown", onFirstPointer);
+      removeEventListener("pointerdown", onUserInput);
+      removeEventListener("keydown", onUserInput);
+      tracks.forEach((a) => {
+        a.pause();
+        a.removeAttribute("src");
+        a.load();
+      });
       document.removeEventListener("visibilitychange", onVisibility);
       delete window.__setTime;
       vids.forEach((v) => v.removeEventListener("ended", onEnded));
@@ -308,8 +402,8 @@ export default function HeadMotionStage() {
         v.removeAttribute("src");
         v.load();
       });
-      plateImg.onload = null;
-      [...texs, introTex, ringTex, plateTex].forEach((t) => gl.deleteTexture(t));
+      imgs.forEach((im) => (im.onload = null));
+      [...texs, introTex, ringTex, plateTex, plateNTex, envSpecTex, envDiffTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);
@@ -318,10 +412,12 @@ export default function HeadMotionStage() {
   }, []);
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-theme={theme}>
       <div className={styles.stage}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={MEDIA.image} alt="" />
+        {Object.entries(MEDIA.themes).map(([name, src]) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={name} src={src} alt="" className={styles.plate} data-on={theme === name} />
+        ))}
         <canvas ref={canvasRef} />
       </div>
 
@@ -337,10 +433,24 @@ export default function HeadMotionStage() {
             </li>
           ))}
         </ol>
-        <p className={styles.notify} aria-live="polite">
-          <span ref={(el) => (notifyRefs.current[0] = el)} />
-          <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
-        </p>
+        <div className={styles.right}>
+          <p className={styles.notify} aria-live="polite">
+            <span ref={(el) => (notifyRefs.current[0] = el)} />
+            <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
+          </p>
+          <div className={styles.themes} role="group" aria-label="배경">
+            {Object.keys(MEDIA.themes).map((name) => (
+              <button
+                key={name}
+                type="button"
+                aria-pressed={theme === name}
+                onClick={() => chooseTheme(name)}
+              >
+                {name[0].toUpperCase() + name.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
       </header>
     </div>
   );

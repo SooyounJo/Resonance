@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import styles from "@/styles/HeadMotion.module.css";
 import {
   RIGHT_DELAY,
@@ -57,25 +57,10 @@ function makeVideo(name, canMp4, loop = true) {
   return v;
 }
 
-// lockTheme: 지정하면 그 테마로 고정하고 전환 버튼·다른 테마 리소스를 쓰지 않음 (단일 HTML 내보내기용)
-export default function HeadMotionStage({ lockTheme } = {}) {
+export default function HeadMotionStage() {
   const canvasRef = useRef(null);
   const stepRefs = useRef([]);
   const notifyRefs = useRef([]);
-  const [theme, setTheme] = useState(lockTheme ?? "main");
-  const themeRef = useRef(theme);
-  themeRef.current = theme;
-  const themeNames = Object.keys(MEDIA.themes).filter((n) => !lockTheme || n === lockTheme);
-
-  useEffect(() => {
-    if (lockTheme) return;
-    const saved = localStorage.getItem("resonance-theme");
-    if (saved && MEDIA.themes[saved]) setTheme(saved);
-  }, []);
-  const chooseTheme = (t) => {
-    setTheme(t);
-    localStorage.setItem("resonance-theme", t);
-  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -121,31 +106,18 @@ export default function HeadMotionStage({ lockTheme } = {}) {
     );
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
 
-    // 이미지 텍스처: 받침 돔 색용 배경 사진 2장 + night 환경맵 2장
-    const imgs = [];
-    function imageTex(unit, uniform, src, repeatX) {
-      const tex = makeTex(gl, unit);
-      if (repeatX) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); // 환경맵 경도 이음새
-      gl.uniform1i(U(uniform), unit);
-      if (!src) return tex;
-      const img = new Image();
-      img.onload = () => {
-        if (disposed) return;
-        gl.activeTexture(gl.TEXTURE0 + unit);
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
-      };
-      img.src = src;
-      imgs.push(img);
-      return tex;
-    }
-    const plateTex = imageTex(3, "uPlate", MEDIA.image);
-    const night = !lockTheme || lockTheme === "night";
-    const plateNTex = imageTex(5, "uPlateN", night && MEDIA.themes.night);
-    const envSpecTex = imageTex(6, "uEnvSpec", night && MEDIA.env.spec, true);
-    const envDiffTex = imageTex(7, "uEnvDiff", night && MEDIA.env.diff, true);
-    const uEnv = U("uEnv");
-    let envMix = themeRef.current === "night" ? 1 : 0, lastT = performance.now();
+    // 받침 돔 색용 배경 사진 텍스처
+    const plateTex = makeTex(gl, 3);
+    gl.uniform1i(U("uPlate"), 3);
+    const plateImg = new Image();
+    plateImg.onload = () => {
+      if (disposed) return;
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, plateTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, plateImg);
+    };
+    plateImg.src = MEDIA.image;
+    let lastT = performance.now();
 
     const uRes = U("uRes");
     function resize() {
@@ -323,12 +295,8 @@ export default function HeadMotionStage({ lockTheme } = {}) {
     function frame() {
       resize();
 
-      // 테마 조명 전환 (배경 사진 크로스페이드 0.8초와 같은 속도)
       const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1);
       lastT = now;
-      const envTarget = themeRef.current === "night" ? 1 : 0;
-      envMix = envTarget > envMix ? Math.min(envMix + dt / 0.8, 1) : Math.max(envMix - dt / 0.8, 0);
-      gl.uniform1f(uEnv, envMix);
 
       // 인트로 → 루프 전환
       if (playing && !loopsStarted && !introFailed && intro.duration && intro.currentTime >= intro.duration - INTRO.overlap) {
@@ -434,8 +402,8 @@ export default function HeadMotionStage({ lockTheme } = {}) {
         v.removeAttribute("src");
         v.load();
       });
-      imgs.forEach((im) => (im.onload = null));
-      [...texs, introTex, ringTex, plateTex, plateNTex, envSpecTex, envDiffTex].forEach((t) => gl.deleteTexture(t));
+      plateImg.onload = null;
+      [...texs, introTex, ringTex, plateTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);
@@ -444,12 +412,10 @@ export default function HeadMotionStage({ lockTheme } = {}) {
   }, []);
 
   return (
-    <div className={styles.page} data-theme={theme}>
+    <div className={styles.page}>
       <div className={styles.stage}>
-        {themeNames.map((name) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={name} src={MEDIA.themes[name]} alt="" className={styles.plate} data-on={theme === name} />
-        ))}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={MEDIA.image} alt="" />
         <canvas ref={canvasRef} />
       </div>
 
@@ -465,26 +431,10 @@ export default function HeadMotionStage({ lockTheme } = {}) {
             </li>
           ))}
         </ol>
-        <div className={styles.right}>
-          <p className={styles.notify} aria-live="polite">
-            <span ref={(el) => (notifyRefs.current[0] = el)} />
-            <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
-          </p>
-          {!lockTheme && (
-            <div className={styles.themes} role="group" aria-label="배경">
-              {themeNames.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  aria-pressed={theme === name}
-                  onClick={() => chooseTheme(name)}
-                >
-                  {name[0].toUpperCase() + name.slice(1)}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <p className={styles.notify} aria-live="polite">
+          <span ref={(el) => (notifyRefs.current[0] = el)} />
+          <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
+        </p>
       </header>
     </div>
   );

@@ -1,4 +1,4 @@
-// /robo2 화면을 Main 테마로 고정해 서버 없이 열리는 HTML 파일 하나로 내보냄 (영상·사진·폰트·음악 모두 포함)
+// /robo2 화면을 서버 없이 열리는 HTML 파일 하나로 내보냄 (영상·사진·폰트·음악·음성 모두 포함)
 // 사용: yarn export:html  →  export/resonance-robo2-main.html (바탕화면에도 복사)
 import { build } from "esbuild";
 import fs from "node:fs";
@@ -7,10 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const THEME = "main";
-const NAME = `resonance-robo2-${THEME}.html`;
-// Main 고정에서는 쓰지 않는 Night 전용 리소스
-const SKIP = new Set(["/media/robo2-3d/device-dark.jpg", "/media/robo2-3d/env-spec.png", "/media/robo2-3d/env-diff.png"]);
+const NAME = "resonance-robo2-main.html";
 const pub = (p) => path.join(root, "public", p);
 const MIME = { ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".jpg": "image/jpeg", ".png": "image/png", ".woff2": "font/woff2" };
 
@@ -19,7 +16,7 @@ import "@/styles/globals.css";
 import { createRoot } from "react-dom/client";
 import HeadMotionStage from "@/components/HeadMotionStage";
 document.title = "Resonance";
-createRoot(document.getElementById("__next")).render(<HeadMotionStage lockTheme="${THEME}" />);
+createRoot(document.getElementById("__next")).render(<HeadMotionStage />);
 `;
 
 const result = await build({
@@ -47,7 +44,6 @@ css = css.split(font).join(`data:font/woff2;base64,${fs.readFileSync(pub(font)).
 const assets = {};
 js = js.replace(/"(\/media\/[^"]+)"/g, (_, p) => {
   const file = p.replace(/\.webm$/, ".mp4");
-  if (SKIP.has(file)) return '""';
   if (!assets[file]) assets[file] = [MIME[path.extname(file)], fs.readFileSync(pub(file)).toString("base64")];
   return `__A[${JSON.stringify(file)}]`;
 });

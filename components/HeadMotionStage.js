@@ -14,6 +14,7 @@ import {
   INTRO,
   IMG_W,
   AUDIO,
+  VOICE,
   PLAYBACK_RATE,
 } from "@/lib/headMotion/config";
 import { RING } from "@/lib/headMotion/ring";
@@ -56,15 +57,18 @@ function makeVideo(name, canMp4, loop = true) {
   return v;
 }
 
-export default function HeadMotionStage() {
+// lockTheme: 지정하면 그 테마로 고정하고 전환 버튼·다른 테마 리소스를 쓰지 않음 (단일 HTML 내보내기용)
+export default function HeadMotionStage({ lockTheme } = {}) {
   const canvasRef = useRef(null);
   const stepRefs = useRef([]);
   const notifyRefs = useRef([]);
-  const [theme, setTheme] = useState("main");
+  const [theme, setTheme] = useState(lockTheme ?? "main");
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const themeNames = Object.keys(MEDIA.themes).filter((n) => !lockTheme || n === lockTheme);
 
   useEffect(() => {
+    if (lockTheme) return;
     const saved = localStorage.getItem("resonance-theme");
     if (saved && MEDIA.themes[saved]) setTheme(saved);
   }, []);
@@ -123,6 +127,7 @@ export default function HeadMotionStage() {
       const tex = makeTex(gl, unit);
       if (repeatX) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); // 환경맵 경도 이음새
       gl.uniform1i(U(uniform), unit);
+      if (!src) return tex;
       const img = new Image();
       img.onload = () => {
         if (disposed) return;
@@ -135,9 +140,10 @@ export default function HeadMotionStage() {
       return tex;
     }
     const plateTex = imageTex(3, "uPlate", MEDIA.image);
-    const plateNTex = imageTex(5, "uPlateN", MEDIA.themes.night);
-    const envSpecTex = imageTex(6, "uEnvSpec", MEDIA.env.spec, true);
-    const envDiffTex = imageTex(7, "uEnvDiff", MEDIA.env.diff, true);
+    const night = !lockTheme || lockTheme === "night";
+    const plateNTex = imageTex(5, "uPlateN", night && MEDIA.themes.night);
+    const envSpecTex = imageTex(6, "uEnvSpec", night && MEDIA.env.spec, true);
+    const envDiffTex = imageTex(7, "uEnvDiff", night && MEDIA.env.diff, true);
     const uEnv = U("uEnv");
     let envMix = themeRef.current === "night" ? 1 : 0, lastT = performance.now();
 
@@ -179,7 +185,7 @@ export default function HeadMotionStage() {
     const tracks = ["bgm", "jazz"].map((k) => {
       const a = new Audio(AUDIO[k]);
       a.preload = "auto";
-      a.loop = false; // 두 곡 모두 끝에 자체 페이드아웃이 있어 반복 없이 루프마다 처음부터 한 번씩
+      a.loop = false; // 반복 없이 루프마다 처음부터 한 번씩 (bgm 은 정렬 시작까지 충분한 길이)
       a.volume = 0;
       return a;
     });
@@ -193,6 +199,21 @@ export default function HeadMotionStage() {
         else if (!want && !a.paused) a.pause();
       });
     }
+    /* ═════════ 음성 (좌측 화면 문장) ═════════ */
+    const voices = VOICE.cues.map(([, src]) => {
+      const a = new Audio(src);
+      a.preload = "auto";
+      a.volume = VOICE.volume;
+      a.defaultPlaybackRate = a.playbackRate = VOICE.rate;
+      a.preservesPitch = true;
+      return a;
+    });
+    let duck = 1;
+    function playVoice(i) {
+      voices[i].currentTime = 0;
+      voices[i].play().catch(() => {});
+    }
+
     const onUserInput = () => syncAudio();
     addEventListener("pointerdown", onUserInput);
     addEventListener("keydown", onUserInput);
@@ -235,6 +256,7 @@ export default function HeadMotionStage() {
     };
     const onVisibility = () => {
       syncAudio();
+      if (document.hidden) voices.forEach((a) => a.pause());
       if (document.hidden || !playing) return;
       if (!loopsStarted) intro.paused && !intro.ended && intro.play().catch(() => {});
       else vids.forEach((v) => v.paused && v.play().catch(() => {}));
@@ -333,9 +355,17 @@ export default function HeadMotionStage() {
 
       // 배경음: 정렬 시작에서 bgm → jazz 로 짧게 전환, 루프가 처음으로 돌아가면 bgm 도 처음부터
       if (playing) {
-        if (t0 < prevT - 1) {
+        const wrapped = t0 < prevT - 1;
+        if (wrapped) {
           tracks[0].currentTime = 0;
           syncAudio();
+        }
+        // 좌측 문장 등장 시각을 지나는 프레임에 해당 음성 재생 (루프가 돌아간 프레임은 끝~처음 구간 모두 검사)
+        if (loopsStarted && !document.hidden) {
+          VOICE.cues.forEach(([cue], i) => {
+            const c = Math.max(cue - VOICE.lead, 0.01);
+            if (wrapped ? c > prevT || c <= t0 : c > prevT && c <= t0) playVoice(i);
+          });
         }
         prevT = t0;
         const wantJazz = loopsStarted && t0 >= AUDIO.jazzFrom - AUDIO.lead;
@@ -349,8 +379,10 @@ export default function HeadMotionStage() {
         if (loopsStarted) master = Math.min(master + dt / AUDIO.startFade, 1);
         // 레이즈드 코사인: 아주 작게 시작해 부드럽게 커지고 끝에서 완만히 정착
         const s = (1 - Math.cos(audioMix * Math.PI)) / 2;
-        tracks[0].volume = AUDIO.volume * master * (1 - s);
-        tracks[1].volume = AUDIO.volume * s;
+        const talking = voices.some((a) => !a.paused);
+        duck = talking ? Math.max(duck - dt / VOICE.duckFade, VOICE.duck) : Math.min(duck + dt / VOICE.duckFade, 1);
+        tracks[0].volume = AUDIO.volume * master * (1 - s) * duck;
+        tracks[1].volume = AUDIO.volume * s * duck;
         if (audioMix !== prevMix && (audioMix === 0 || audioMix === 1)) syncAudio();
       }
 
@@ -388,7 +420,7 @@ export default function HeadMotionStage() {
       removeEventListener("pointerdown", onFirstPointer);
       removeEventListener("pointerdown", onUserInput);
       removeEventListener("keydown", onUserInput);
-      tracks.forEach((a) => {
+      [...tracks, ...voices].forEach((a) => {
         a.pause();
         a.removeAttribute("src");
         a.load();
@@ -414,9 +446,9 @@ export default function HeadMotionStage() {
   return (
     <div className={styles.page} data-theme={theme}>
       <div className={styles.stage}>
-        {Object.entries(MEDIA.themes).map(([name, src]) => (
+        {themeNames.map((name) => (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={name} src={src} alt="" className={styles.plate} data-on={theme === name} />
+          <img key={name} src={MEDIA.themes[name]} alt="" className={styles.plate} data-on={theme === name} />
         ))}
         <canvas ref={canvasRef} />
       </div>
@@ -438,18 +470,20 @@ export default function HeadMotionStage() {
             <span ref={(el) => (notifyRefs.current[0] = el)} />
             <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
           </p>
-          <div className={styles.themes} role="group" aria-label="배경">
-            {Object.keys(MEDIA.themes).map((name) => (
-              <button
-                key={name}
-                type="button"
-                aria-pressed={theme === name}
-                onClick={() => chooseTheme(name)}
-              >
-                {name[0].toUpperCase() + name.slice(1)}
-              </button>
-            ))}
-          </div>
+          {!lockTheme && (
+            <div className={styles.themes} role="group" aria-label="배경">
+              {themeNames.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={theme === name}
+                  onClick={() => chooseTheme(name)}
+                >
+                  {name[0].toUpperCase() + name.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </header>
     </div>

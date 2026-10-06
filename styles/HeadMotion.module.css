@@ -54,6 +54,7 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
+  transform: translateX(45px);
 }
 
 /* 단계 캡슐 */

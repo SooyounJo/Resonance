@@ -100,7 +100,7 @@
   transition: opacity 0.6s ease, filter 0.6s ease;
 }
 
-/* 채워지는 부분: 진행률(--p)만큼 잘라 보이는 어두운 층 */
+/* 채워지는 부분: 진행률(--p)만큼 잘라 보이는 층 */
 .fill {
   position: absolute;
   inset: 0;
@@ -109,8 +109,14 @@
   place-items: center;
   background: var(--cap-fill);
   color: var(--ui-fg);
-  transition: background-color 0.6s ease;
+  transition: background-color 0.6s ease, color 0.6s ease;
   clip-path: inset(0 calc((1 - var(--p)) * 100%) 0 0 round 999px);
+}
+
+/* 게이지가 차는 중인 단계만 흑백 반전으로 강조 */
+.step.active .fill {
+  background: var(--ui-fg);
+  color: var(--cap-fill);
 }
 
 .step.active > span,

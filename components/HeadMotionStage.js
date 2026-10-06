@@ -60,7 +60,6 @@ function makeVideo(name, canMp4, loop = true) {
 export default function HeadMotionStage() {
   const canvasRef = useRef(null);
   const stepRefs = useRef([]);
-  const notifyRefs = useRef([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -259,7 +258,7 @@ export default function HeadMotionStage() {
       return k * k * (3 - 2 * k);
     };
     /* ═════════ 상단 단계 캡슐 ═════════ */
-    let curStep = -1, front = 0;
+    let curStep = -1;
     function updateSteps(t) {
       let k = SEGMENTS.length - 1;
       while (k > 0 && t < SEGMENTS[k][0]) k--;
@@ -275,19 +274,6 @@ export default function HeadMotionStage() {
         el.classList.toggle(styles.active, j === k);
         el.classList.toggle(styles.done, j < k);
       });
-      // 알림: 이전 문구는 블러로 사라지고 새 문구가 블러에서 선명해짐
-      const n = notifyRefs.current;
-      if (n[0] && n[1]) {
-        if (curStep >= 0) {
-          n[front].className = styles.out;
-          front ^= 1;
-        }
-        const el = n[front];
-        el.textContent = SEGMENTS[k][3];
-        el.className = "";
-        void el.offsetWidth;
-        el.className = styles.in;
-      }
       curStep = k;
     }
 
@@ -431,10 +417,6 @@ export default function HeadMotionStage() {
             </li>
           ))}
         </ol>
-        <p className={styles.notify} aria-live="polite">
-          <span ref={(el) => (notifyRefs.current[0] = el)} />
-          <span ref={(el) => (notifyRefs.current[1] = el)} className={styles.out} />
-        </p>
       </header>
     </div>
   );

@@ -13,11 +13,55 @@
   color: var(--ui-fg);
 }
 
+.idle,
+.idle * {
+  cursor: none;
+}
+
 .stage {
   position: relative;
   width: min(100vw, calc(100vh * 2560 / 1600));
   aspect-ratio: 2560 / 1600;
-  transform: translateY(4%); /* 상단 바 공간만큼 기기를 아래로 (탁자 앞 가장자리가 잘리지 않는 한도) */
+  transform: translateY(5%); /* 상단 바 공간만큼 기기를 아래로 */
+}
+
+/* ═════════ /move: 1080×1350 세로 틀 ═════════ */
+.movePage {
+  background: #111;
+}
+
+/* 틀 안 크기는 cqw(틀 폭 1080 = 100cqw) 기준 */
+.frame {
+  position: relative;
+  width: min(100vw, calc(100vh * 1080 / 1350));
+  aspect-ratio: 1080 / 1350;
+  overflow: hidden;
+  container-type: size;
+  background: #ededed; /* 배경 사진 가장자리 색과 같게 해 사진 경계가 보이지 않음 */
+}
+
+/* 두 기기 바깥 끝(사진 1334px)이 틀 폭의 85%, 기기 세로 중심이 틀 높이의 52% */
+.frame .stage {
+  position: absolute;
+  width: 163.2cqw;
+  left: 50%;
+  top: 17.3cqw;
+  transform: translateX(-50%);
+}
+
+.frameTitle {
+  position: absolute;
+  top: 7.4cqw;
+  left: 0;
+  right: 0;
+  margin: 0;
+  text-align: center;
+  font-family: "Wanted Sans Variable", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 3.24cqw; /* 1080 기준 35px: 대문자 높이 약 24px, 글자 폭 약 178px */
+  font-weight: 400;
+  line-height: 1;
+  color: #8f8f8f;
+  z-index: 1;
 }
 
 .stage img,

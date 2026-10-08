@@ -21,6 +21,8 @@ import { RING } from "@/lib/headMotion/ring";
 import { sample, nod, drift, xform, mod } from "@/lib/headMotion/motion";
 import { VS, FS } from "@/lib/headMotion/shaders";
 
+const CURSOR_IDLE = 5; // 마우스가 이만큼(초) 움직이지 않으면 커서 숨김
+
 // 캡슐 줄 폭: 좌측 머리 바깥 끝 ~ 우측 머리 바깥 끝 (사진 폭 대비 비율)
 const STEPS_W = (HEADS[1].c[0] + HEADS[1].r - (HEADS[0].c[0] - HEADS[0].r)) / IMG_W;
 
@@ -57,9 +59,30 @@ function makeVideo(name, canMp4, loop = true) {
   return v;
 }
 
-export default function HeadMotionStage() {
+// variant="move": 1080×1350 세로 틀 안에 기기 + 중앙 상단 작은 제목 (단계 캡슐 없음)
+export default function HeadMotionStage({ variant }) {
   const canvasRef = useRef(null);
   const stepRefs = useRef([]);
+  const pageRef = useRef(null);
+
+  // 마우스가 잠시 멈추면 커서를 숨기고, 움직이면 다시 보이게
+  useEffect(() => {
+    const page = pageRef.current;
+    let timer;
+    const wake = () => {
+      page.classList.remove(styles.idle);
+      clearTimeout(timer);
+      timer = setTimeout(() => page.classList.add(styles.idle), CURSOR_IDLE * 1000);
+    };
+    wake();
+    addEventListener("pointermove", wake);
+    addEventListener("pointerdown", wake);
+    return () => {
+      clearTimeout(timer);
+      removeEventListener("pointermove", wake);
+      removeEventListener("pointerdown", wake);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -149,6 +172,8 @@ export default function HeadMotionStage() {
     vids.forEach((v) => v.addEventListener("ended", onEnded));
 
     /* ═════════ 재생 ═════════ */
+    // 영상 파일 렌더링용 (?render): 실시간 재생 대신 window.__renderAt(초)로 지정한 시각의 장면을 정확히 그림
+    const renderMode = new URLSearchParams(location.search).has("render");
     let playing = false, loopsStarted = false, introFailed = false, forced = null, disposed = false;
     const timers = [];
 
@@ -244,7 +269,11 @@ export default function HeadMotionStage() {
               if (v === intro) v.addEventListener("error", r, { once: true });
             })
       )
-    ).then(() => !disposed && start());
+    ).then(() => {
+      if (disposed) return;
+      if (renderMode) window.__renderReady = true;
+      else start();
+    });
 
     window.__setTime = (t) => {
       forced = t;
@@ -363,9 +392,30 @@ export default function HeadMotionStage() {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       updateSteps(t0);
-      raf = requestAnimationFrame(frame);
+      if (!renderMode) raf = requestAnimationFrame(frame);
     }
-    raf = requestAnimationFrame(frame);
+    if (!renderMode) raf = requestAnimationFrame(frame);
+    else {
+      const seek = (v, t) =>
+        new Promise((res) => {
+          t = Math.min(Math.max(t, 0), v.duration - 0.01);
+          if (Math.abs(v.currentTime - t) < 1e-3 && !v.seeking) return res();
+          v.addEventListener("seeked", res, { once: true });
+          v.currentTime = t;
+        });
+      window.__renderInfo = () => {
+        const loopStart = (intro.duration - INTRO.overlap) / PLAYBACK_RATE;
+        return { loopStart, end: loopStart + DUR / PLAYBACK_RATE };
+      };
+      window.__renderAt = async (T) => {
+        const { loopStart } = window.__renderInfo();
+        const lt = (T - loopStart) * PLAYBACK_RATE;
+        loopsStarted = lt >= 0;
+        await Promise.all([seek(intro, T * PLAYBACK_RATE), seek(vids[0], lt), seek(vids[1], lt - RIGHT_DELAY)]);
+        frame();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      };
+    }
 
     return () => {
       disposed = true;
@@ -397,14 +447,28 @@ export default function HeadMotionStage() {
     };
   }, []);
 
-  return (
-    <div className={styles.page}>
-      <div className={styles.stage}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={MEDIA.image} alt="" />
-        <canvas ref={canvasRef} />
-      </div>
+  const stage = (
+    <div className={styles.stage}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={MEDIA.image} alt="" />
+      <canvas ref={canvasRef} />
+    </div>
+  );
 
+  if (variant === "move") {
+    return (
+      <div ref={pageRef} className={`${styles.page} ${styles.movePage}`}>
+        <div className={styles.frame}>
+          <h1 className={styles.frameTitle}>Resonance</h1>
+          {stage}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={pageRef} className={styles.page}>
+      {stage}
       <header className={styles.header} style={{ "--steps-w": STEPS_W }}>
         <h1 className={styles.title}>Resonance</h1>
         <ol className={styles.steps}>
